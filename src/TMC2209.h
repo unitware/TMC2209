@@ -7,16 +7,26 @@
 
 #ifndef TMC2209_H
 #define TMC2209_H
-#include <Arduino.h>
 
-#if !defined(ESP32) && !defined(ARDUINO_ARCH_SAMD) && !defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_SAM_DUE) && !defined(ARDUINO_ARCH_RENESAS)
-#  define SOFTWARE_SERIAL_INCLUDED true
+#ifdef ARDUINO
+  #include <Arduino.h>
+  #if !defined(ESP32) && !defined(ARDUINO_ARCH_SAMD) && !defined(ARDUINO_ARCH_RP2040) && !defined(ARDUINO_SAM_DUE) && !defined(ARDUINO_ARCH_RENESAS)
+  #  define SOFTWARE_SERIAL_INCLUDED true
+  #else
+  #  define SOFTWARE_SERIAL_INCLUDED false
+  #endif
+  #if SOFTWARE_SERIAL_INCLUDED
+  #  include <SoftwareSerial.h>
+  #endif
 #else
-#  define SOFTWARE_SERIAL_INCLUDED false
+  #include "pico/stdlib.h"
+  #include "hardware/uart.h"
+  #include "hardware/gpio.h"
+  #include <stdint.h>
+  #include <stdbool.h>
 #endif
-#if SOFTWARE_SERIAL_INCLUDED
-#  include <SoftwareSerial.h>
-#endif
+
+
 
 
 class TMC2209
@@ -34,10 +44,19 @@ public:
   // Identify which microcontroller serial port is connected to the TMC2209 e.g.
   // Serial1, Serial2, etc. Optionally identify which serial address is assigned
   // to the TMC2209 if not the default of SERIAL_ADDRESS_0.
-#if !defined(ARDUINO_ARCH_RENESAS)
-  void setup(HardwareSerial & serial,
+// Add Pico SDK UART setup method
+#ifndef ARDUINO
+  void setup(uart_inst_t * uart_instance,
+    uint tx_pin,
+    uint rx_pin, 
     long serial_baud_rate=115200,
     SerialAddress serial_address=SERIAL_ADDRESS_0);
+#else
+    #if !defined(ARDUINO_ARCH_RENESAS)
+    void setup(HardwareSerial & serial,
+      long serial_baud_rate=115200,
+      SerialAddress serial_address=SERIAL_ADDRESS_0);
+    #endif
 #endif
   // Alternate rx and tx pins may be specified for certain microcontrollers e.g.
   // ESP32 and RP2040
@@ -74,6 +93,7 @@ public:
   void setHardwareEnablePin(uint8_t hardware_enable_pin);
   void enable();
   void disable();
+  bool isEnabled();
 
   // valid values = 1,2,4,8,...128,256, other values get rounded down
   void setMicrostepsPerStep(uint16_t microsteps_per_step);
@@ -263,16 +283,22 @@ public:
   uint16_t getMicrostepCounter();
 
 private:
+#ifdef ARDUINO
   HardwareSerial * hardware_serial_ptr_;
 #if SOFTWARE_SERIAL_INCLUDED
   SoftwareSerial * software_serial_ptr_;
+#endif
+#else
+  uart_inst_t * uart_instance_;
+  uint tx_pin_;
+  uint rx_pin_;
 #endif
   uint32_t serial_baud_rate_;
   uint8_t serial_address_;
   int16_t hardware_enable_pin_;
 
   void initialize(long serial_baud_rate=115200,
-    SerialAddress serial_address=SERIAL_ADDRESS_0);
+  SerialAddress serial_address=SERIAL_ADDRESS_0);
   int serialAvailable();
   size_t serialWrite(uint8_t c);
   int serialRead();

@@ -5,11 +5,23 @@
 // Peter Polidoro peter@polidoro.io
 // ----------------------------------------------------------------------------
 #include "TMC2209.h"
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+#include "hardware/uart.h"
 
+static int map(int x, int in_min, int in_max, int out_min, int out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
 
 TMC2209::TMC2209()
 {
+ #ifdef ARDUINO
   hardware_serial_ptr_ = nullptr;
+#else
+  uart_instance_ = nullptr;
+  tx_pin_ = 0;
+  rx_pin_ = 0;
+#endif  
 #if SOFTWARE_SERIAL_INCLUDED
   software_serial_ptr_ = nullptr;
 #endif
@@ -19,7 +31,7 @@ TMC2209::TMC2209()
   cool_step_enabled_ = false;
 }
 
-#if !defined(ARDUINO_ARCH_RENESAS)
+#if defined(ARDUINO) && !defined(ARDUINO_ARCH_RENESAS)
 void TMC2209::setup(HardwareSerial & serial,
   long serial_baud_rate,
   SerialAddress serial_address)
@@ -101,20 +113,84 @@ void TMC2209::setup(SoftwareSerial & serial,
 }
 #endif
 
+#ifndef ARDUINO
+// Pico SDK UART setup method
+void TMC2209::setup(uart_inst_t * uart_instance,
+  uint tx_pin,
+  uint rx_pin,
+  long serial_baud_rate,
+  SerialAddress serial_address)
+{
+  uart_instance_ = uart_instance;
+  tx_pin_ = tx_pin;
+  rx_pin_ = rx_pin;
+  
+  // Initialize UART
+  uart_init(uart_instance_, serial_baud_rate);
+  gpio_set_function(tx_pin_, GPIO_FUNC_UART);
+  gpio_set_function(rx_pin_, GPIO_FUNC_UART);
+  
+  initialize(serial_baud_rate, serial_address);
+}
+
+// Replace serial methods with Pico SDK UART functions
+int TMC2209::serialAvailable()
+{
+  if (uart_instance_ != nullptr)
+  {
+    return uart_is_readable(uart_instance_) ? 1 : 0;
+  }
+  return 0;
+}
+
+size_t TMC2209::serialWrite(uint8_t c)
+{
+  if (uart_instance_ != nullptr)
+  {
+    uart_putc_raw(uart_instance_, c);
+    return 1;
+  }
+  return 0;
+}
+
+int TMC2209::serialRead()
+{
+  if (uart_instance_ != nullptr && uart_is_readable(uart_instance_))
+  {
+    return uart_getc(uart_instance_);
+  }
+  return -1;
+}
+
+void TMC2209::serialFlush()
+{
+  if (uart_instance_ != nullptr)
+  {
+    uart_tx_wait_blocking(uart_instance_);
+  }
+}
+#endif
+
 // unidirectional methods
 
 void TMC2209::setHardwareEnablePin(uint8_t hardware_enable_pin)
 {
   hardware_enable_pin_ = hardware_enable_pin;
-  pinMode(hardware_enable_pin_, OUTPUT);
-  digitalWrite(hardware_enable_pin_, HIGH);
+  gpio_init(hardware_enable_pin_);
+  gpio_set_dir(hardware_enable_pin_, GPIO_OUT);
+  gpio_put(hardware_enable_pin_, true);
+}
+
+bool TMC2209::isEnabled()
+{
+  return gpio_get(hardware_enable_pin_) == false;
 }
 
 void TMC2209::enable()
 {
   if (hardware_enable_pin_ >= 0)
   {
-    digitalWrite(hardware_enable_pin_, LOW);
+    gpio_put(hardware_enable_pin_, false);
   }
   chopper_config_.toff = toff_;
   writeStoredChopperConfig();
@@ -124,7 +200,7 @@ void TMC2209::disable()
 {
   if (hardware_enable_pin_ >= 0)
   {
-    digitalWrite(hardware_enable_pin_, HIGH);
+    gpio_put(hardware_enable_pin_, true);
   }
   chopper_config_.toff = TOFF_DISABLE;
   writeStoredChopperConfig();
@@ -689,6 +765,7 @@ void TMC2209::initialize(long serial_baud_rate,
   disableAutomaticGradientAdaptation();
 }
 
+#if defined(ARDUINO)
 int TMC2209::serialAvailable()
 {
   if (hardware_serial_ptr_ != nullptr)
@@ -710,12 +787,12 @@ size_t TMC2209::serialWrite(uint8_t c)
   {
     return hardware_serial_ptr_->write(c);
   }
-#if SOFTWARE_SERIAL_INCLUDED
+  #if SOFTWARE_SERIAL_INCLUDED
   else if (software_serial_ptr_ != nullptr)
   {
     return software_serial_ptr_->write(c);
   }
-#endif
+  #endif
   return 0;
 }
 
@@ -725,12 +802,12 @@ int TMC2209::serialRead()
   {
     return hardware_serial_ptr_->read();
   }
-#if SOFTWARE_SERIAL_INCLUDED
+  #if SOFTWARE_SERIAL_INCLUDED
   else if (software_serial_ptr_ != nullptr)
   {
     return software_serial_ptr_->read();
   }
-#endif
+  #endif
   return 0;
 }
 
@@ -741,6 +818,7 @@ void TMC2209::serialFlush()
     return hardware_serial_ptr_->flush();
   }
 }
+#endif
 
 void TMC2209::setOperationModeToSerial(SerialAddress serial_address)
 {
@@ -888,7 +966,11 @@ void TMC2209::sendDatagramBidirectional(Datagram & datagram,
   while ((serialAvailable() < datagram_size) and
     (echo_delay < ECHO_DELAY_MAX_MICROSECONDS))
   {
+    #ifdef ARDUINO
     delayMicroseconds(ECHO_DELAY_INC_MICROSECONDS);
+    #else
+    sleep_us(ECHO_DELAY_INC_MICROSECONDS);
+    #endif
     echo_delay += ECHO_DELAY_INC_MICROSECONDS;
   }
 
@@ -937,7 +1019,11 @@ uint32_t TMC2209::read(uint8_t register_address)
     while ((serialAvailable() < WRITE_READ_REPLY_DATAGRAM_SIZE) and
       (reply_delay < REPLY_DELAY_MAX_MICROSECONDS))
     {
+      #ifdef ARDUINO
       delayMicroseconds(REPLY_DELAY_INC_MICROSECONDS);
+      #else
+      sleep_us(REPLY_DELAY_INC_MICROSECONDS);
+      #endif
       reply_delay += REPLY_DELAY_INC_MICROSECONDS;
     }
 
@@ -962,7 +1048,11 @@ uint32_t TMC2209::read(uint8_t register_address)
       return reverseData(read_reply_datagram.data);
     }
 
+    #ifdef ARDUINO
     delay(READ_RETRY_DELAY_MS);
+    #else
+    sleep_ms(READ_RETRY_DELAY_MS);
+    #endif
   }
 
   return 0;
