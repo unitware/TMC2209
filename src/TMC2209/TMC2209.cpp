@@ -15,90 +15,14 @@ static int map(int x, int in_min, int in_max, int out_min, int out_max) {
 
 TMC2209::TMC2209()
 {
- #ifdef ARDUINO
-  hardware_serial_ptr_ = nullptr;
-#else
   uart_instance_ = nullptr;
   tx_pin_ = 0;
   rx_pin_ = 0;
-#endif  
-#if SOFTWARE_SERIAL_INCLUDED
-  software_serial_ptr_ = nullptr;
-#endif
   serial_baud_rate_ = 115200;
   serial_address_ = SERIAL_ADDRESS_0;
   hardware_enable_pin_ = -1;
   cool_step_enabled_ = false;
 }
-
-#if defined(ARDUINO) && !defined(ARDUINO_ARCH_RENESAS)
-void TMC2209::setup(HardwareSerial & serial,
-  long serial_baud_rate,
-  SerialAddress serial_address)
-{
-  hardware_serial_ptr_ = &serial;
-  hardware_serial_ptr_->end();
-  hardware_serial_ptr_->begin(serial_baud_rate);
-
-  initialize(serial_baud_rate, serial_address);
-}
-#endif
-#if defined(ESP32)
-void TMC2209::setup(HardwareSerial & serial,
-  long serial_baud_rate,
-  SerialAddress serial_address,
-  int16_t alternate_rx_pin,
-  int16_t alternate_tx_pin)
-{
-  hardware_serial_ptr_ = &serial;
-  if ((alternate_rx_pin < 0) || (alternate_tx_pin < 0))
-  {
-    // hardware_serial_ptr_->end();  // Causes issues with some versions of ESP32
-    hardware_serial_ptr_->begin(serial_baud_rate);
-  }
-  else
-  {
-    // hardware_serial_ptr_->end();  // Causes issues with some versions of ESP32
-    hardware_serial_ptr_->begin(serial_baud_rate, SERIAL_8N1, alternate_rx_pin, alternate_tx_pin);
-  }
-
-  initialize(serial_baud_rate, serial_address);
-}
-#elif defined(ARDUINO_ARCH_RP2040)
-void TMC2209::setup(SerialUART & serial,
-  long serial_baud_rate,
-  SerialAddress serial_address,
-  int16_t alternate_rx_pin,
-  int16_t alternate_tx_pin)
-{
-  hardware_serial_ptr_ = &serial;
-  if ((alternate_rx_pin < 0) || (alternate_tx_pin < 0))
-  {
-    serial.end();
-    serial.begin(serial_baud_rate);
-  }
-  else
-  {
-    hardware_serial_ptr_->end();
-    serial.setRX(alternate_rx_pin);
-    serial.setTX(alternate_tx_pin);
-    serial.begin(serial_baud_rate);
-  }
-
-  initialize(serial_baud_rate, serial_address);
-}
-#elif defined(ARDUINO_ARCH_RENESAS)
-void TMC2209::setup(UART & serial,
-  long serial_baud_rate,
-  SerialAddress serial_address)
-{
-  hardware_serial_ptr_ = &serial;
-  serial.end();
-  serial.begin(serial_baud_rate);
-
-  initialize(serial_baud_rate, serial_address);
-}
-#endif
 
 #if SOFTWARE_SERIAL_INCLUDED
 void TMC2209::setup(SoftwareSerial & serial,
